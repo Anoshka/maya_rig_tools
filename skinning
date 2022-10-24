@@ -1,7 +1,3 @@
-# skinning.py
-# Matt Riche 2021
-# sr_suite_utilities module for skinning related operations.
-
 import pymel.core as pm
 import maya.mel as mel
 
