@@ -1,0 +1,160 @@
+from . import skinning
+
+import pymel.core as pm
+import maya.cmds as cmds
+import sys
+
+def add_prefix(tgt = 1):
+    all = pm.ls(selection = True)
+    if tgt == 1:
+        pref = "tgt_deltas_"
+    else:
+        pref = "source_deltas_"
+    
+    for i in all:
+        name = pref + i
+        pm.rename(i, name)
+
+def save_skins_unbind():
+    """
+    step one in baking deltas 
+    saves skin cluster in a duplicate node and unbinds skin. 
+    runs based on selection
+    """  
+    #takes selection
+    old_geo = pm.ls("*tgt_deltas_*")
+
+    #duplicates selection, saves skincluster and ubinds original skin
+    dup_geo = []
+    dup_grp = pm.group(em = True)
+    ex_joint = pm.joint(n = "temp_jnt", p = (0, 0, 0))
+    for i in old_geo:
+        if "Shape" in str(i):
+            continue
+        name = i.split("tgt_deltas_")[1]
+        dup = pm.duplicate(i, n = "dupe" + name)
+        hist = pm.listHistory(i, pdo=True)
+        #print("hist", hist)
+        skins = pm.ls(hist, type="skinCluster")[0]
+        jts = skinning.select_bound_joints(node = skins)
+        pm.select(jts)
+        joints = pm.ls(selection = True)
+        pm.skinCluster(joints, dup)
+        skinning.rip_skin(source_mesh = i, target_mesh = dup, match_option = 0, influence = 0)
+        pm.parent(dup, dup_grp)
+        pm.skinCluster(i, ub = True, e = True)
+        pm.skinCluster(ex_joint, i)
+        
+    return
+
+def bake_deltas(source_mesh = None, target_mesh = None):
+    """
+    bakes deltas based on selection
+    select target mesh first, and then source mesh
+    """
+    
+    target_mesh = pm.ls("*tgt_deltas_*")
+    source_mesh = pm.ls("*source_deltas_*")
+    
+    #nodes = pm.listHistory(target_mesh, pruneDagObjects = True, interestLevel = 1)
+    #tweak_node = None
+    for tgt in target_mesh:
+        if "Shape" in str(tgt):
+            
+            continue
+        print ("baking ", tgt)
+        name = tgt.split("tgt_deltas_")[1]
+        source = None
+        for i in source_mesh:
+            if "Orig" in str(i):
+                
+                continue
+            if name in str(i):
+                print("to ", i)
+                source = i
+        if source:
+            pm.select(tgt, r = True)
+            pm.select(source  , add = True)
+
+
+
+            try:
+                pm.polyMoveVertex(source, constructionHistory = 1, random = 0)
+            except:
+                pm.warning("unable to add transform node, please check if locked")
+                pass
+
+            pm.select(source)
+
+            #bake transform node
+            try:
+                pm.bakePartialHistory(ppt = True)
+            except:
+                pm.warning("unable to bake partial history")
+                pass
+
+def clean_targets(orig = None):
+    """
+    checks for duplicates with skin cluster, reapplies skin cluster 
+    and removes extra nodes
+    can provide an original node if required
+    """
+
+    #finds duplicates based on prefix
+    target_dupes = pm.ls("dupe*")
+    par = pm.listRelatives(target_dupes[0], parent = True)[0]
+    tgts = pm.ls("*tgt_deltas_*")
+    sources = pm.ls("*source_deltas_*")
+    for i in tgts:
+        if "Shape" in str(i):
+            continue
+        name = i.split("tgt_deltas_")[1]
+        pm.rename(i, name)
+
+    for i in sources:
+        if "Shape" in str(i):
+            continue
+        name = i.split("source_deltas_")[1]
+        pm.rename(i, name)
+
+    for i in target_dupes:
+        #finds original
+        orig = i.split("dupe")[1]
+        if "Orig" in orig:
+            orig = orig.split("Orig")[0]
+        print ("original is ", orig)
+        pm.skinCluster(orig, ub = True, e = True)
+        #gets skincluster
+        hist = pm.listHistory(i, pdo=True)
+        skins = pm.ls(hist, type="skinCluster")
+        #rebinds skin
+        if skins:
+            skins_cluster = skins[0]
+        
+        jts = skinning.select_bound_joints(node = skins_cluster)
+        pm.select(jts)
+        joints = pm.ls(selection = True)
+        try:
+            pm.select(orig, add = True)
+        except:
+            pm.warning("unable to find original mesh, please select it")
+            pass
+
+        try:
+            pm.skinCluster()
+        except:
+            pm.warning("unable to bind skin")
+            pass   
+
+        try:
+            skinning.rip_skin(source_mesh = i, target_mesh = orig, match_option = 0, influence = 0)
+        except:
+            pm.warning("rip skin not working")
+            pass
+            
+        print("scene cleaned up")
+        
+    pm.delete(par)
+
+
+
